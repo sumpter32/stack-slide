@@ -176,7 +176,7 @@ export default function StackGame() {
     const handle = (e: Event) => {
       e.preventDefault();
       if (gameState === 'playing') drop();
-      else if (gameState !== 'playing') start();
+      else start();
     };
     const keyHandle = (e: KeyboardEvent) => {
       if (e.code === 'Space') {

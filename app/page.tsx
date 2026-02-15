@@ -39,6 +39,7 @@ export default function StackSlide() {
   const [perfectStreak, setPerfectStreak] = useState(0);
   const [highScore, setHighScore] = useState(0);
   const [speed, setSpeed] = useState(2);
+  const [canPlace, setCanPlace] = useState(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
 
   const playSound = useCallback((freq: number, type: OscillatorType = 'sine', dur = 0.1) => {
@@ -87,7 +88,10 @@ export default function StackSlide() {
     setScore(0);
     setPerfectStreak(0);
     setSpeed(2);
+    setCanPlace(false);
     setGameState('playing');
+    // Wait before allowing placement
+    setTimeout(() => setCanPlace(true), 300);
   }, []);
 
   // Block movement
@@ -130,7 +134,7 @@ export default function StackSlide() {
   }, [fallingPieces.length]);
 
   const placeBlock = useCallback(() => {
-    if (!currentBlock || gameState !== 'playing') return;
+    if (!currentBlock || gameState !== 'playing' || !canPlace) return;
     
     const lastBlock = blocks[blocks.length - 1];
     
@@ -228,7 +232,7 @@ export default function StackSlide() {
     setBlockX(blockDir > 0 ? -finalWidth : GAME_WIDTH);
     setSpeed(s => Math.min(s + 0.15, 6));
     
-  }, [currentBlock, blocks, blockX, gameState, score, perfectStreak, playPlace, playSound, blockDir]);
+  }, [currentBlock, blocks, blockX, gameState, score, perfectStreak, playPlace, playSound, blockDir, canPlace]);
 
   // Input handlers
   useEffect(() => {

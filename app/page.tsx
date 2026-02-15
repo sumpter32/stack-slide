@@ -274,7 +274,7 @@ export default function StackSlide() {
     const handleTap = () => {
       if (gameState === 'playing') {
         placeBlock();
-      } else if (gameState !== 'playing') {
+      } else {
         startGame();
       }
     };

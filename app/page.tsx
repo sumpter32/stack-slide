@@ -7,7 +7,6 @@ interface Block {
   x: number;
   width: number;
   color: string;
-  placed: boolean;
 }
 
 interface FallingPiece {
@@ -25,23 +24,21 @@ const COLORS = [
   '#3b82f6', '#8b5cf6', '#ec4899', '#f43f5e', '#06b6d4'
 ];
 
-const GAME_WIDTH = 320;
-const BLOCK_HEIGHT = 20;
-const BASE_WIDTH = 120;
+const GAME_WIDTH = 300;
+const BLOCK_HEIGHT = 18;
+const BASE_WIDTH = 140;
 
 export default function StackSlide() {
   const [gameState, setGameState] = useState<'menu' | 'playing' | 'dead'>('menu');
   const [blocks, setBlocks] = useState<Block[]>([]);
-  const [currentBlock, setCurrentBlock] = useState<Block | null>(null);
+  const [currentBlock, setCurrentBlock] = useState<{ width: number; color: string } | null>(null);
+  const [blockX, setBlockX] = useState(0);
+  const [blockDir, setBlockDir] = useState(1);
   const [fallingPieces, setFallingPieces] = useState<FallingPiece[]>([]);
-  const [towerOffset, setTowerOffset] = useState(0);
-  const [towerDir, setTowerDir] = useState(1);
   const [score, setScore] = useState(0);
   const [perfectStreak, setPerfectStreak] = useState(0);
   const [highScore, setHighScore] = useState(0);
-  const [speed, setSpeed] = useState(3);
-  const [blockX, setBlockX] = useState(0);
-  const [blockDir, setBlockDir] = useState(1);
+  const [speed, setSpeed] = useState(2);
   const audioCtxRef = useRef<AudioContext | null>(null);
 
   const playSound = useCallback((freq: number, type: OscillatorType = 'sine', dur = 0.1) => {
@@ -65,14 +62,10 @@ export default function StackSlide() {
 
   const playPlace = useCallback((perfect: boolean) => {
     if (perfect) {
-      [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => playSound(f, 'sine', 0.15), i * 50));
+      [523, 659, 784].forEach((f, i) => setTimeout(() => playSound(f, 'sine', 0.12), i * 60));
     } else {
-      playSound(300 + Math.random() * 100, 'sine', 0.1);
+      playSound(350, 'sine', 0.08);
     }
-  }, [playSound]);
-
-  const playFall = useCallback(() => {
-    playSound(200, 'sawtooth', 0.2);
   }, [playSound]);
 
   const startGame = useCallback(() => {
@@ -81,87 +74,57 @@ export default function StackSlide() {
       x: GAME_WIDTH / 2 - BASE_WIDTH / 2,
       width: BASE_WIDTH,
       color: COLORS[0],
-      placed: true,
     };
     
     setBlocks([baseBlock]);
     setCurrentBlock({
-      id: 1,
-      x: 0,
       width: BASE_WIDTH,
       color: COLORS[1],
-      placed: false,
     });
+    setBlockX(-BASE_WIDTH);
+    setBlockDir(1);
     setFallingPieces([]);
-    setTowerOffset(0);
-    setTowerDir(1);
     setScore(0);
     setPerfectStreak(0);
-    setSpeed(3);
-    setBlockX(0);
-    setBlockDir(1);
+    setSpeed(2);
     setGameState('playing');
   }, []);
 
-  // Tower sliding
-  useEffect(() => {
-    if (gameState !== 'playing') return;
-    
-    const interval = setInterval(() => {
-      setTowerOffset(prev => {
-        const slideSpeed = 0.5 + blocks.length * 0.05;
-        let next = prev + towerDir * slideSpeed;
-        
-        if (next > 30) {
-          setTowerDir(-1);
-          next = 30;
-        } else if (next < -30) {
-          setTowerDir(1);
-          next = -30;
-        }
-        
-        return next;
-      });
-    }, 50);
-    
-    return () => clearInterval(interval);
-  }, [gameState, towerDir, blocks.length]);
-
-  // Current block sliding
+  // Block movement
   useEffect(() => {
     if (gameState !== 'playing' || !currentBlock) return;
     
     const interval = setInterval(() => {
       setBlockX(prev => {
-        const blockSpeed = speed + blocks.length * 0.3;
+        const blockSpeed = speed + blocks.length * 0.15;
         let next = prev + blockDir * blockSpeed;
         
-        if (next > GAME_WIDTH - currentBlock.width) {
+        if (next > GAME_WIDTH) {
           setBlockDir(-1);
-          next = GAME_WIDTH - currentBlock.width;
-        } else if (next < 0) {
+          next = GAME_WIDTH;
+        } else if (next < -currentBlock.width) {
           setBlockDir(1);
-          next = 0;
+          next = -currentBlock.width;
         }
         
         return next;
       });
-    }, 30);
+    }, 20);
     
     return () => clearInterval(interval);
   }, [gameState, currentBlock, blockDir, speed, blocks.length]);
 
-  // Falling pieces animation
+  // Falling pieces
   useEffect(() => {
     if (fallingPieces.length === 0) return;
     
     const interval = setInterval(() => {
       setFallingPieces(prev => 
         prev
-          .map(p => ({ ...p, y: p.y + p.vy, vy: p.vy + 0.5, rotation: p.rotation + 5 }))
-          .filter(p => p.y < 600)
+          .map(p => ({ ...p, y: p.y + p.vy, vy: p.vy + 0.8, rotation: p.rotation + 8 }))
+          .filter(p => p.y < 500)
       );
-    }, 30);
+    }, 25);
     
     return () => clearInterval(interval);
   }, [fallingPieces.length]);
@@ -170,74 +133,75 @@ export default function StackSlide() {
     if (!currentBlock || gameState !== 'playing') return;
     
     const lastBlock = blocks[blocks.length - 1];
-    const lastBlockX = lastBlock.x + towerOffset;
     
-    // Calculate overlap
+    // Simple overlap calculation
     const blockLeft = blockX;
     const blockRight = blockX + currentBlock.width;
-    const lastLeft = lastBlockX;
-    const lastRight = lastBlockX + lastBlock.width;
+    const lastLeft = lastBlock.x;
+    const lastRight = lastBlock.x + lastBlock.width;
     
     const overlapLeft = Math.max(blockLeft, lastLeft);
     const overlapRight = Math.min(blockRight, lastRight);
     const overlapWidth = overlapRight - overlapLeft;
     
-    if (overlapWidth <= 0) {
-      // Complete miss!
-      playFall();
+    // Complete miss
+    if (overlapWidth <= 5) {
+      playSound(150, 'sawtooth', 0.3);
       setFallingPieces(prev => [...prev, {
         id: Date.now(),
         x: blockX,
-        y: 80,
+        y: 60,
         width: currentBlock.width,
         color: currentBlock.color,
         rotation: 0,
-        vy: 2,
+        vy: 1,
       }]);
       setGameState('dead');
       setHighScore(h => Math.max(h, score));
       return;
     }
     
-    const isPerfect = Math.abs(overlapWidth - lastBlock.width) < 3;
+    // Check if perfect (within 5px tolerance)
+    const isPerfect = Math.abs(overlapWidth - lastBlock.width) < 5;
     
-    // Create falling pieces for overhang
+    // Create falling overhang pieces
     if (blockLeft < lastLeft) {
       setFallingPieces(prev => [...prev, {
         id: Date.now(),
         x: blockLeft,
-        y: 80,
-        width: lastLeft - blockLeft,
+        y: 60,
+        width: Math.min(lastLeft - blockLeft, currentBlock.width),
         color: currentBlock.color,
-        rotation: 0,
-        vy: 2,
+        rotation: -5,
+        vy: 1,
       }]);
     }
     if (blockRight > lastRight) {
       setFallingPieces(prev => [...prev, {
         id: Date.now() + 1,
         x: lastRight,
-        y: 80,
-        width: blockRight - lastRight,
+        y: 60,
+        width: Math.min(blockRight - lastRight, currentBlock.width),
         color: currentBlock.color,
-        rotation: 0,
-        vy: 2,
+        rotation: 5,
+        vy: 1,
       }]);
     }
     
-    // Place block
+    // Place the block
+    const finalWidth = isPerfect ? lastBlock.width : Math.max(overlapWidth, 20);
     const newBlock: Block = {
-      id: currentBlock.id,
-      x: overlapLeft - towerOffset,
-      width: isPerfect ? lastBlock.width : overlapWidth,
+      id: blocks.length,
+      x: overlapLeft,
+      width: finalWidth,
       color: currentBlock.color,
-      placed: true,
     };
     
     setBlocks(prev => [...prev, newBlock]);
     
     // Score
-    const points = isPerfect ? 50 + perfectStreak * 10 : 10;
+    const streakBonus = isPerfect ? perfectStreak * 5 : 0;
+    const points = isPerfect ? 25 + streakBonus : 10;
     setScore(s => s + points);
     
     if (isPerfect) {
@@ -248,30 +212,28 @@ export default function StackSlide() {
     
     playPlace(isPerfect);
     
-    // Next block
-    const newWidth = isPerfect ? lastBlock.width : overlapWidth;
-    if (newWidth < 10) {
+    // Check if block too small
+    if (finalWidth < 15) {
       setGameState('dead');
       setHighScore(h => Math.max(h, score + points));
       return;
     }
     
+    // Next block
     setCurrentBlock({
-      id: currentBlock.id + 1,
-      x: 0,
-      width: newWidth,
-      color: COLORS[(currentBlock.id + 1) % COLORS.length],
-      placed: false,
+      width: finalWidth,
+      color: COLORS[(blocks.length + 1) % COLORS.length],
     });
     setBlockDir(Math.random() > 0.5 ? 1 : -1);
-    setBlockX(blockDir > 0 ? 0 : GAME_WIDTH - newWidth);
-    setSpeed(s => Math.min(s + 0.1, 8));
+    setBlockX(blockDir > 0 ? -finalWidth : GAME_WIDTH);
+    setSpeed(s => Math.min(s + 0.15, 6));
     
-  }, [currentBlock, blocks, blockX, towerOffset, gameState, score, perfectStreak, playPlace, playFall, blockDir]);
+  }, [currentBlock, blocks, blockX, gameState, score, perfectStreak, playPlace, playSound, blockDir]);
 
-  // Touch/click handler
+  // Input handlers
   useEffect(() => {
-    const handleTap = () => {
+    const handleTap = (e: Event) => {
+      e.preventDefault();
       if (gameState === 'playing') {
         placeBlock();
       } else {
@@ -279,81 +241,102 @@ export default function StackSlide() {
       }
     };
     
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        if (gameState === 'playing') {
+          placeBlock();
+        } else {
+          startGame();
+        }
+      }
+    };
+    
     window.addEventListener('click', handleTap);
     window.addEventListener('touchstart', handleTap);
-    window.addEventListener('keydown', (e) => { if (e.key === ' ') handleTap(); });
+    window.addEventListener('keydown', handleKey);
     
     return () => {
       window.removeEventListener('click', handleTap);
       window.removeEventListener('touchstart', handleTap);
+      window.removeEventListener('keydown', handleKey);
     };
   }, [gameState, placeBlock, startGame]);
 
   const towerHeight = blocks.length * BLOCK_HEIGHT;
-  const viewOffset = Math.max(0, towerHeight - 200);
+  const viewOffset = Math.max(0, towerHeight - 250);
 
   return (
-    <div className="h-screen flex flex-col items-center justify-center bg-gradient-to-b from-indigo-900 via-purple-900 to-pink-900">
+    <div className="h-screen flex flex-col items-center justify-center bg-gradient-to-b from-slate-900 via-indigo-900 to-purple-900">
       {/* Header */}
-      <div className="flex items-center justify-between w-full max-w-sm px-4 mb-4">
+      <div className="flex items-center justify-between w-full max-w-xs px-4 mb-3">
         <div>
           <p className="text-3xl font-bold text-white">{score}</p>
-          <p className="text-xs text-purple-300">Score</p>
+          <p className="text-xs text-indigo-300">Score</p>
         </div>
-        {perfectStreak > 0 && (
+        {perfectStreak > 0 && gameState === 'playing' && (
           <div className="text-center animate-pulse">
-            <p className="text-2xl font-bold text-yellow-400">🔥 x{perfectStreak}</p>
+            <p className="text-xl font-bold text-yellow-400">🔥 x{perfectStreak}</p>
             <p className="text-xs text-yellow-300">PERFECT!</p>
           </div>
         )}
         <div className="text-right">
-          <p className="text-xl font-bold text-purple-200">{blocks.length - 1}</p>
-          <p className="text-xs text-purple-300">Height</p>
+          <p className="text-2xl font-bold text-indigo-200">{blocks.length - 1}</p>
+          <p className="text-xs text-indigo-300">Height</p>
         </div>
       </div>
 
       {/* Game area */}
       <div 
-        className="relative bg-black/30 rounded-2xl overflow-hidden border-2 border-purple-500/30"
-        style={{ width: GAME_WIDTH, height: 400 }}
+        className="relative bg-black/40 rounded-2xl overflow-hidden border-2 border-indigo-500/30"
+        style={{ width: GAME_WIDTH, height: 380 }}
       >
-        {/* Tower container */}
+        {/* Tower */}
         <div 
-          className="absolute bottom-0 left-0 right-0 transition-transform duration-100"
-          style={{ 
-            transform: `translateX(${towerOffset}px) translateY(${viewOffset}px)`,
-          }}
+          className="absolute bottom-0 left-0 right-0"
+          style={{ transform: `translateY(${viewOffset}px)` }}
         >
-          {/* Placed blocks */}
           {blocks.map((block, i) => (
             <div
               key={block.id}
-              className="absolute transition-all duration-100"
+              className="absolute"
               style={{
                 left: block.x,
                 bottom: i * BLOCK_HEIGHT,
                 width: block.width,
                 height: BLOCK_HEIGHT - 2,
-                background: `linear-gradient(180deg, ${block.color}, ${block.color}aa)`,
-                borderRadius: 4,
-                boxShadow: `0 2px 10px ${block.color}44`,
+                background: `linear-gradient(180deg, ${block.color}, ${block.color}cc)`,
+                borderRadius: 3,
+                boxShadow: `0 2px 8px ${block.color}44`,
               }}
             />
           ))}
         </div>
 
-        {/* Current moving block */}
+        {/* Moving block */}
         {currentBlock && gameState === 'playing' && (
           <div
             className="absolute"
             style={{
               left: blockX,
-              top: 80,
+              top: 60,
               width: currentBlock.width,
               height: BLOCK_HEIGHT - 2,
-              background: `linear-gradient(180deg, ${currentBlock.color}, ${currentBlock.color}aa)`,
-              borderRadius: 4,
-              boxShadow: `0 0 20px ${currentBlock.color}66`,
+              background: `linear-gradient(180deg, ${currentBlock.color}, ${currentBlock.color}cc)`,
+              borderRadius: 3,
+              boxShadow: `0 0 15px ${currentBlock.color}88`,
+            }}
+          />
+        )}
+
+        {/* Target guide line */}
+        {gameState === 'playing' && blocks.length > 0 && (
+          <div 
+            className="absolute bg-white/30 h-0.5"
+            style={{
+              left: blocks[blocks.length - 1].x,
+              top: 78,
+              width: blocks[blocks.length - 1].width,
             }}
           />
         )}
@@ -369,24 +352,25 @@ export default function StackSlide() {
               width: piece.width,
               height: BLOCK_HEIGHT - 2,
               background: piece.color,
-              borderRadius: 4,
+              borderRadius: 3,
               transform: `rotate(${piece.rotation}deg)`,
-              opacity: 0.7,
+              opacity: 0.8,
             }}
           />
         ))}
 
-        {/* Menu overlay */}
+        {/* Menu */}
         {gameState === 'menu' && (
           <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center">
-            <div className="text-5xl mb-4">🏗️</div>
+            <div className="text-5xl mb-3">🏗️</div>
             <h1 className="text-3xl font-bold text-white mb-2">Stack & Slide</h1>
-            <p className="text-purple-300 text-center px-8 mb-6">
-              Stack blocks on a sliding tower!<br/>
-              Tap to place. Don't miss!
+            <p className="text-indigo-300 text-center px-6 mb-6 text-sm">
+              Tap to stack blocks!<br/>
+              Land perfectly for bonus points!
             </p>
-            <div className="text-6xl mb-4">👆</div>
-            <p className="text-white/80">Tap to Start</p>
+            <div className="bg-indigo-500 text-white px-8 py-3 rounded-full font-bold text-lg">
+              TAP TO START
+            </div>
           </div>
         )}
 
@@ -394,30 +378,21 @@ export default function StackSlide() {
         {gameState === 'dead' && (
           <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center">
             <div className="text-4xl mb-2">💥</div>
-            <h2 className="text-2xl font-bold text-white mb-1">Game Over!</h2>
-            <p className="text-4xl font-bold text-purple-300 mb-1">{score}</p>
-            <p className="text-lg text-purple-400 mb-1">Height: {blocks.length - 1}</p>
+            <h2 className="text-2xl font-bold text-white mb-2">Game Over!</h2>
+            <p className="text-4xl font-bold text-indigo-300">{score}</p>
+            <p className="text-indigo-400 mb-1">Height: {blocks.length - 1}</p>
             {score >= highScore && score > 0 && (
-              <p className="text-yellow-400 mb-2">🏆 New Best!</p>
+              <p className="text-yellow-400 text-lg">🏆 New Best!</p>
             )}
-            <p className="text-white/60 mt-4">Tap to Retry</p>
+            <div className="bg-indigo-500 text-white px-6 py-2 rounded-full font-bold mt-4">
+              TAP TO RETRY
+            </div>
           </div>
-        )}
-
-        {/* Guide line */}
-        {gameState === 'playing' && blocks.length > 0 && (
-          <div 
-            className="absolute top-20 h-px bg-white/20"
-            style={{
-              left: blocks[blocks.length - 1].x + towerOffset,
-              width: blocks[blocks.length - 1].width,
-            }}
-          />
         )}
       </div>
 
-      <p className="mt-4 text-purple-400 text-sm">Tap anywhere to stack!</p>
-      {highScore > 0 && <p className="text-purple-500 text-xs mt-1">Best: {highScore}</p>}
+      <p className="mt-3 text-indigo-400 text-sm">Tap anywhere to place block!</p>
+      {highScore > 0 && <p className="text-indigo-500 text-xs mt-1">Best: {highScore}</p>}
     </div>
   );
 }

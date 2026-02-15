@@ -3,400 +3,309 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface Block {
-  id: number;
   x: number;
   width: number;
   color: string;
 }
 
-interface FallingPiece {
-  id: number;
-  x: number;
-  y: number;
-  width: number;
-  color: string;
-  rotation: number;
-  vy: number;
-}
+const COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899'];
+const GAME_WIDTH = 280;
+const BLOCK_HEIGHT = 22;
+const START_WIDTH = 120;
 
-const COLORS = [
-  '#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', 
-  '#3b82f6', '#8b5cf6', '#ec4899', '#f43f5e', '#06b6d4'
-];
-
-const GAME_WIDTH = 300;
-const BLOCK_HEIGHT = 18;
-const BASE_WIDTH = 140;
-
-export default function StackSlide() {
-  const [gameState, setGameState] = useState<'menu' | 'playing' | 'dead'>('menu');
-  const [blocks, setBlocks] = useState<Block[]>([]);
-  const [currentBlock, setCurrentBlock] = useState<{ width: number; color: string } | null>(null);
-  const [blockX, setBlockX] = useState(0);
-  const [blockDir, setBlockDir] = useState(1);
-  const [fallingPieces, setFallingPieces] = useState<FallingPiece[]>([]);
+export default function StackGame() {
+  const [gameState, setGameState] = useState<'menu' | 'playing' | 'over'>('menu');
+  const [stack, setStack] = useState<Block[]>([]);
+  const [movingBlock, setMovingBlock] = useState({ x: 0, width: START_WIDTH, dir: 1 });
   const [score, setScore] = useState(0);
-  const [perfectStreak, setPerfectStreak] = useState(0);
-  const [highScore, setHighScore] = useState(0);
-  const [speed, setSpeed] = useState(2);
-  const [canPlace, setCanPlace] = useState(false);
-  const audioCtxRef = useRef<AudioContext | null>(null);
+  const [combo, setCombo] = useState(0);
+  const [bestScore, setBestScore] = useState(0);
+  const [ready, setReady] = useState(false);
+  const [fallingParts, setFallingParts] = useState<{ x: number; y: number; w: number; c: string; vy: number; r: number }[]>([]);
+  const audioRef = useRef<AudioContext | null>(null);
 
-  const playSound = useCallback((freq: number, type: OscillatorType = 'sine', dur = 0.1) => {
+  const beep = useCallback((freq: number, dur = 0.1) => {
     try {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      }
-      const ctx = audioCtxRef.current;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.value = freq;
-      osc.type = type;
-      gain.gain.value = 0.1;
-      osc.start();
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
-      osc.stop(ctx.currentTime + dur);
-    } catch (e) {}
+      if (!audioRef.current) audioRef.current = new AudioContext();
+      const o = audioRef.current.createOscillator();
+      const g = audioRef.current.createGain();
+      o.connect(g); g.connect(audioRef.current.destination);
+      o.frequency.value = freq;
+      g.gain.value = 0.08;
+      o.start();
+      g.gain.exponentialRampToValueAtTime(0.001, audioRef.current.currentTime + dur);
+      o.stop(audioRef.current.currentTime + dur);
+    } catch {}
   }, []);
 
-  const playPlace = useCallback((perfect: boolean) => {
-    if (perfect) {
-      [523, 659, 784].forEach((f, i) => setTimeout(() => playSound(f, 'sine', 0.12), i * 60));
-    } else {
-      playSound(350, 'sine', 0.08);
-    }
-  }, [playSound]);
-
-  const startGame = useCallback(() => {
-    const baseBlock: Block = {
-      id: 0,
-      x: GAME_WIDTH / 2 - BASE_WIDTH / 2,
-      width: BASE_WIDTH,
-      color: COLORS[0],
-    };
-    
-    setBlocks([baseBlock]);
-    setCurrentBlock({
-      width: BASE_WIDTH,
-      color: COLORS[1],
-    });
-    setBlockX(-BASE_WIDTH);
-    setBlockDir(1);
-    setFallingPieces([]);
+  const start = useCallback(() => {
+    const baseX = (GAME_WIDTH - START_WIDTH) / 2;
+    setStack([{ x: baseX, width: START_WIDTH, color: COLORS[0] }]);
+    setMovingBlock({ x: 0, width: START_WIDTH, dir: 1 });
     setScore(0);
-    setPerfectStreak(0);
-    setSpeed(2);
-    setCanPlace(false);
+    setCombo(0);
+    setFallingParts([]);
+    setReady(false);
     setGameState('playing');
-    // Wait before allowing placement
-    setTimeout(() => setCanPlace(true), 300);
+    setTimeout(() => setReady(true), 400);
   }, []);
 
-  // Block movement
+  // Moving block animation
   useEffect(() => {
-    if (gameState !== 'playing' || !currentBlock) return;
+    if (gameState !== 'playing') return;
+    const speed = 3 + stack.length * 0.3;
     
-    const interval = setInterval(() => {
-      setBlockX(prev => {
-        const blockSpeed = speed + blocks.length * 0.15;
-        let next = prev + blockDir * blockSpeed;
+    const id = setInterval(() => {
+      setMovingBlock(prev => {
+        let newX = prev.x + prev.dir * speed;
+        let newDir = prev.dir;
         
-        if (next > GAME_WIDTH) {
-          setBlockDir(-1);
-          next = GAME_WIDTH;
-        } else if (next < -currentBlock.width) {
-          setBlockDir(1);
-          next = -currentBlock.width;
+        if (newX + prev.width > GAME_WIDTH) {
+          newX = GAME_WIDTH - prev.width;
+          newDir = -1;
+        } else if (newX < 0) {
+          newX = 0;
+          newDir = 1;
         }
         
-        return next;
+        return { ...prev, x: newX, dir: newDir };
       });
     }, 20);
     
-    return () => clearInterval(interval);
-  }, [gameState, currentBlock, blockDir, speed, blocks.length]);
+    return () => clearInterval(id);
+  }, [gameState, stack.length]);
 
-  // Falling pieces
+  // Falling parts animation
   useEffect(() => {
-    if (fallingPieces.length === 0) return;
-    
-    const interval = setInterval(() => {
-      setFallingPieces(prev => 
-        prev
-          .map(p => ({ ...p, y: p.y + p.vy, vy: p.vy + 0.8, rotation: p.rotation + 8 }))
-          .filter(p => p.y < 500)
+    if (fallingParts.length === 0) return;
+    const id = setInterval(() => {
+      setFallingParts(prev => 
+        prev.map(p => ({ ...p, y: p.y + p.vy, vy: p.vy + 1, r: p.r + 5 }))
+            .filter(p => p.y < 500)
       );
-    }, 25);
-    
-    return () => clearInterval(interval);
-  }, [fallingPieces.length]);
+    }, 30);
+    return () => clearInterval(id);
+  }, [fallingParts.length]);
 
-  const placeBlock = useCallback(() => {
-    if (!currentBlock || gameState !== 'playing' || !canPlace) return;
+  const drop = useCallback(() => {
+    if (gameState !== 'playing' || !ready) return;
+
+    const top = stack[stack.length - 1];
+    const m = movingBlock;
     
-    const lastBlock = blocks[blocks.length - 1];
-    
-    // Simple overlap calculation
-    const blockLeft = blockX;
-    const blockRight = blockX + currentBlock.width;
-    const lastLeft = lastBlock.x;
-    const lastRight = lastBlock.x + lastBlock.width;
-    
-    const overlapLeft = Math.max(blockLeft, lastLeft);
-    const overlapRight = Math.min(blockRight, lastRight);
-    const overlapWidth = overlapRight - overlapLeft;
-    
-    // Complete miss
-    if (overlapWidth <= 5) {
-      playSound(150, 'sawtooth', 0.3);
-      setFallingPieces(prev => [...prev, {
-        id: Date.now(),
-        x: blockX,
-        y: 60,
-        width: currentBlock.width,
-        color: currentBlock.color,
-        rotation: 0,
-        vy: 1,
+    // Calculate overlap
+    const overlapStart = Math.max(m.x, top.x);
+    const overlapEnd = Math.min(m.x + m.width, top.x + top.width);
+    const overlapWidth = overlapEnd - overlapStart;
+
+    // Miss completely
+    if (overlapWidth <= 0) {
+      beep(150, 0.3);
+      setFallingParts(prev => [...prev, {
+        x: m.x, y: 50, w: m.width, 
+        c: COLORS[(stack.length) % COLORS.length], 
+        vy: 2, r: m.dir * 5
       }]);
-      setGameState('dead');
-      setHighScore(h => Math.max(h, score));
+      setGameState('over');
+      setBestScore(b => Math.max(b, score));
       return;
     }
-    
-    // Check if perfect (within 5px tolerance)
-    const isPerfect = Math.abs(overlapWidth - lastBlock.width) < 5;
-    
-    // Create falling overhang pieces
-    if (blockLeft < lastLeft) {
-      setFallingPieces(prev => [...prev, {
-        id: Date.now(),
-        x: blockLeft,
-        y: 60,
-        width: Math.min(lastLeft - blockLeft, currentBlock.width),
-        color: currentBlock.color,
-        rotation: -5,
-        vy: 1,
-      }]);
+
+    // Check for perfect landing (within 8px tolerance)
+    const isPerfect = overlapWidth >= top.width - 8;
+    const finalWidth = isPerfect ? top.width : overlapWidth;
+    const finalX = isPerfect ? top.x : overlapStart;
+
+    // Add falling overhang
+    if (!isPerfect) {
+      if (m.x < top.x) {
+        setFallingParts(prev => [...prev, {
+          x: m.x, y: 50, w: top.x - m.x,
+          c: COLORS[(stack.length) % COLORS.length],
+          vy: 2, r: -10
+        }]);
+      }
+      if (m.x + m.width > top.x + top.width) {
+        setFallingParts(prev => [...prev, {
+          x: top.x + top.width, y: 50, w: (m.x + m.width) - (top.x + top.width),
+          c: COLORS[(stack.length) % COLORS.length],
+          vy: 2, r: 10
+        }]);
+      }
     }
-    if (blockRight > lastRight) {
-      setFallingPieces(prev => [...prev, {
-        id: Date.now() + 1,
-        x: lastRight,
-        y: 60,
-        width: Math.min(blockRight - lastRight, currentBlock.width),
-        color: currentBlock.color,
-        rotation: 5,
-        vy: 1,
-      }]);
-    }
-    
-    // Place the block
-    const finalWidth = isPerfect ? lastBlock.width : Math.max(overlapWidth, 20);
+
+    // Add to stack
     const newBlock: Block = {
-      id: blocks.length,
-      x: overlapLeft,
+      x: finalX,
       width: finalWidth,
-      color: currentBlock.color,
+      color: COLORS[(stack.length) % COLORS.length]
     };
-    
-    setBlocks(prev => [...prev, newBlock]);
-    
+    setStack(prev => [...prev, newBlock]);
+
     // Score
-    const streakBonus = isPerfect ? perfectStreak * 5 : 0;
-    const points = isPerfect ? 25 + streakBonus : 10;
+    const newCombo = isPerfect ? combo + 1 : 0;
+    setCombo(newCombo);
+    const points = isPerfect ? 10 + newCombo * 5 : 5;
     setScore(s => s + points);
-    
+
+    // Sound
     if (isPerfect) {
-      setPerfectStreak(p => p + 1);
+      [440, 554, 659].forEach((f, i) => setTimeout(() => beep(f, 0.1), i * 50));
     } else {
-      setPerfectStreak(0);
+      beep(330, 0.08);
     }
-    
-    playPlace(isPerfect);
-    
-    // Check if block too small
+
+    // Game over if too thin
     if (finalWidth < 15) {
-      setGameState('dead');
-      setHighScore(h => Math.max(h, score + points));
+      setGameState('over');
+      setBestScore(b => Math.max(b, score + points));
       return;
     }
-    
+
     // Next block
-    setCurrentBlock({
+    setMovingBlock({
+      x: m.dir > 0 ? 0 : GAME_WIDTH - finalWidth,
       width: finalWidth,
-      color: COLORS[(blocks.length + 1) % COLORS.length],
+      dir: m.dir
     });
-    setBlockDir(Math.random() > 0.5 ? 1 : -1);
-    setBlockX(blockDir > 0 ? -finalWidth : GAME_WIDTH);
-    setSpeed(s => Math.min(s + 0.15, 6));
-    
-  }, [currentBlock, blocks, blockX, gameState, score, perfectStreak, playPlace, playSound, blockDir, canPlace]);
 
-  // Input handlers
+  }, [gameState, ready, stack, movingBlock, score, combo, beep]);
+
+  // Input
   useEffect(() => {
-    const handleTap = (e: Event) => {
+    const handle = (e: Event) => {
       e.preventDefault();
-      if (gameState === 'playing') {
-        placeBlock();
-      } else {
-        startGame();
-      }
+      if (gameState === 'playing') drop();
+      else if (gameState !== 'playing') start();
     };
-    
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === ' ' || e.key === 'Enter') {
+    const keyHandle = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
         e.preventDefault();
-        if (gameState === 'playing') {
-          placeBlock();
-        } else {
-          startGame();
-        }
+        if (gameState === 'playing') drop();
+        else start();
       }
     };
     
-    window.addEventListener('click', handleTap);
-    window.addEventListener('touchstart', handleTap);
-    window.addEventListener('keydown', handleKey);
-    
+    window.addEventListener('mousedown', handle);
+    window.addEventListener('touchstart', handle);
+    window.addEventListener('keydown', keyHandle);
     return () => {
-      window.removeEventListener('click', handleTap);
-      window.removeEventListener('touchstart', handleTap);
-      window.removeEventListener('keydown', handleKey);
+      window.removeEventListener('mousedown', handle);
+      window.removeEventListener('touchstart', handle);
+      window.removeEventListener('keydown', keyHandle);
     };
-  }, [gameState, placeBlock, startGame]);
+  }, [gameState, drop, start]);
 
-  const towerHeight = blocks.length * BLOCK_HEIGHT;
-  const viewOffset = Math.max(0, towerHeight - 250);
+  const viewOffset = Math.max(0, (stack.length - 12) * BLOCK_HEIGHT);
 
   return (
-    <div className="h-screen flex flex-col items-center justify-center bg-gradient-to-b from-slate-900 via-indigo-900 to-purple-900">
-      {/* Header */}
-      <div className="flex items-center justify-between w-full max-w-xs px-4 mb-3">
-        <div>
-          <p className="text-3xl font-bold text-white">{score}</p>
-          <p className="text-xs text-indigo-300">Score</p>
+    <div className="h-screen flex flex-col items-center justify-center bg-gradient-to-b from-slate-900 via-purple-950 to-indigo-950">
+      {/* Score */}
+      <div className="flex items-center gap-8 mb-4">
+        <div className="text-center">
+          <div className="text-4xl font-bold text-white">{score}</div>
+          <div className="text-xs text-purple-300">SCORE</div>
         </div>
-        {perfectStreak > 0 && gameState === 'playing' && (
-          <div className="text-center animate-pulse">
-            <p className="text-xl font-bold text-yellow-400">🔥 x{perfectStreak}</p>
-            <p className="text-xs text-yellow-300">PERFECT!</p>
+        {combo > 0 && gameState === 'playing' && (
+          <div className="text-center animate-bounce">
+            <div className="text-2xl font-bold text-yellow-400">🔥 x{combo + 1}</div>
+            <div className="text-xs text-yellow-300">PERFECT!</div>
           </div>
         )}
-        <div className="text-right">
-          <p className="text-2xl font-bold text-indigo-200">{blocks.length - 1}</p>
-          <p className="text-xs text-indigo-300">Height</p>
+        <div className="text-center">
+          <div className="text-2xl font-bold text-purple-300">{stack.length - 1}</div>
+          <div className="text-xs text-purple-400">HEIGHT</div>
         </div>
       </div>
 
-      {/* Game area */}
-      <div 
-        className="relative bg-black/40 rounded-2xl overflow-hidden border-2 border-indigo-500/30"
-        style={{ width: GAME_WIDTH, height: 380 }}
-      >
-        {/* Tower */}
-        <div 
-          className="absolute bottom-0 left-0 right-0"
-          style={{ transform: `translateY(${viewOffset}px)` }}
-        >
-          {blocks.map((block, i) => (
-            <div
-              key={block.id}
-              className="absolute"
-              style={{
-                left: block.x,
-                bottom: i * BLOCK_HEIGHT,
-                width: block.width,
-                height: BLOCK_HEIGHT - 2,
-                background: `linear-gradient(180deg, ${block.color}, ${block.color}cc)`,
-                borderRadius: 3,
-                boxShadow: `0 2px 8px ${block.color}44`,
-              }}
-            />
+      {/* Game */}
+      <div className="relative overflow-hidden rounded-2xl border-2 border-purple-500/40 bg-black/30"
+           style={{ width: GAME_WIDTH, height: 360 }}>
+        
+        {/* Stack */}
+        <div className="absolute bottom-0 left-0 right-0" style={{ transform: `translateY(${viewOffset}px)` }}>
+          {stack.map((block, i) => (
+            <div key={i} className="absolute" style={{
+              left: block.x,
+              bottom: i * BLOCK_HEIGHT,
+              width: block.width,
+              height: BLOCK_HEIGHT - 2,
+              background: `linear-gradient(to bottom, ${block.color}, ${block.color}dd)`,
+              borderRadius: 4,
+              boxShadow: `0 2px 10px ${block.color}44`
+            }} />
           ))}
         </div>
 
         {/* Moving block */}
-        {currentBlock && gameState === 'playing' && (
-          <div
-            className="absolute"
-            style={{
-              left: blockX,
-              top: 60,
-              width: currentBlock.width,
-              height: BLOCK_HEIGHT - 2,
-              background: `linear-gradient(180deg, ${currentBlock.color}, ${currentBlock.color}cc)`,
-              borderRadius: 3,
-              boxShadow: `0 0 15px ${currentBlock.color}88`,
-            }}
-          />
+        {gameState === 'playing' && (
+          <div className="absolute" style={{
+            left: movingBlock.x,
+            top: 50,
+            width: movingBlock.width,
+            height: BLOCK_HEIGHT - 2,
+            background: `linear-gradient(to bottom, ${COLORS[stack.length % COLORS.length]}, ${COLORS[stack.length % COLORS.length]}dd)`,
+            borderRadius: 4,
+            boxShadow: `0 0 20px ${COLORS[stack.length % COLORS.length]}66`
+          }} />
         )}
 
-        {/* Target guide line */}
-        {gameState === 'playing' && blocks.length > 0 && (
-          <div 
-            className="absolute bg-white/30 h-0.5"
-            style={{
-              left: blocks[blocks.length - 1].x,
-              top: 78,
-              width: blocks[blocks.length - 1].width,
-            }}
-          />
+        {/* Target indicator */}
+        {gameState === 'playing' && stack.length > 0 && (
+          <div className="absolute opacity-40" style={{
+            left: stack[stack.length - 1].x,
+            top: 70,
+            width: stack[stack.length - 1].width,
+            height: 2,
+            background: 'white'
+          }} />
         )}
 
-        {/* Falling pieces */}
-        {fallingPieces.map(piece => (
-          <div
-            key={piece.id}
-            className="absolute"
-            style={{
-              left: piece.x,
-              top: piece.y,
-              width: piece.width,
-              height: BLOCK_HEIGHT - 2,
-              background: piece.color,
-              borderRadius: 3,
-              transform: `rotate(${piece.rotation}deg)`,
-              opacity: 0.8,
-            }}
-          />
+        {/* Falling parts */}
+        {fallingParts.map((p, i) => (
+          <div key={i} className="absolute" style={{
+            left: p.x,
+            top: p.y,
+            width: p.w,
+            height: BLOCK_HEIGHT - 2,
+            background: p.c,
+            borderRadius: 4,
+            transform: `rotate(${p.r}deg)`,
+            opacity: 0.8
+          }} />
         ))}
 
         {/* Menu */}
         {gameState === 'menu' && (
-          <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center">
-            <div className="text-5xl mb-3">🏗️</div>
-            <h1 className="text-3xl font-bold text-white mb-2">Stack & Slide</h1>
-            <p className="text-indigo-300 text-center px-6 mb-6 text-sm">
-              Tap to stack blocks!<br/>
-              Land perfectly for bonus points!
-            </p>
-            <div className="bg-indigo-500 text-white px-8 py-3 rounded-full font-bold text-lg">
+          <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center">
+            <div className="text-6xl mb-4">🏗️</div>
+            <h1 className="text-4xl font-bold text-white mb-2">STACK</h1>
+            <p className="text-purple-300 mb-6">Tap to stack blocks!</p>
+            <div className="bg-purple-500 px-8 py-3 rounded-full text-white font-bold text-lg">
               TAP TO START
             </div>
           </div>
         )}
 
-        {/* Game over */}
-        {gameState === 'dead' && (
-          <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center">
-            <div className="text-4xl mb-2">💥</div>
-            <h2 className="text-2xl font-bold text-white mb-2">Game Over!</h2>
-            <p className="text-4xl font-bold text-indigo-300">{score}</p>
-            <p className="text-indigo-400 mb-1">Height: {blocks.length - 1}</p>
-            {score >= highScore && score > 0 && (
-              <p className="text-yellow-400 text-lg">🏆 New Best!</p>
+        {/* Game Over */}
+        {gameState === 'over' && (
+          <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center">
+            <div className="text-5xl mb-2">💥</div>
+            <h2 className="text-2xl font-bold text-white mb-2">GAME OVER</h2>
+            <div className="text-5xl font-bold text-purple-300 mb-1">{score}</div>
+            <p className="text-purple-400 mb-1">Height: {stack.length - 1}</p>
+            {score >= bestScore && score > 0 && (
+              <p className="text-yellow-400 text-lg mb-2">🏆 NEW BEST!</p>
             )}
-            <div className="bg-indigo-500 text-white px-6 py-2 rounded-full font-bold mt-4">
+            <div className="bg-purple-500 px-6 py-2 rounded-full text-white font-bold mt-3">
               TAP TO RETRY
             </div>
           </div>
         )}
       </div>
 
-      <p className="mt-3 text-indigo-400 text-sm">Tap anywhere to place block!</p>
-      {highScore > 0 && <p className="text-indigo-500 text-xs mt-1">Best: {highScore}</p>}
+      <p className="mt-4 text-purple-400 text-sm">Tap to drop • Perfect = Bonus!</p>
+      {bestScore > 0 && <p className="text-purple-500 text-xs mt-1">Best: {bestScore}</p>}
     </div>
   );
 }
